@@ -6,6 +6,6 @@ Making shapefiles for points in the NARS coastal dataset.
 * `02-get-huc12shed.Rmd` uses the watershed boundary dataset to identify the HUC-12 the point is located in and all upstream HUC 12s, and saves a shapefile for each using the site ID. 
 * `map.Rmd` combines shapefiles for each point and plots
 
-**Issues**
+Notes
 
-* Great lakes points include the entire lake and are therefore artificially large. Consider separating points with "GL" in site ID to run separately, or if there is a way to use HUC Type for not including the entire lake.
+* Points falling in HUC 12s of the great lakes were adjusted to find the HUC12 (and any upstream) associated with the closest shoreline point. Closest shoreline points were identified by buffering the lake polygon 500m. Frontal watersheds around lakes make this complicated. 
