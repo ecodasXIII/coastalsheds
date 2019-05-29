@@ -36,17 +36,16 @@ huc12sheds_list <- purrr::map(huc12shed_ids, ~mutate(huc12sheds_list[[.x]], SITE
 huc12sheds <- sf::st_as_sf(data.table::rbindlist(huc12sheds_list))
 # save as one shapefile
 head(huc12sheds)
-huc12sheds %>% st_write("/nfs/khondula-data/coastalsheds/huc12sheds_union.shp")
+huc12sheds %>% st_write(file.path(data_dir_coastalsheds, "huc12sheds_union.shp"))
 ```
 
 Plot leaflet map for a select site id with watershed
 
 ```{r}
-data_dir_coastalsheds <- "/nfs/khondula-data/coastalsheds"
 ncaa_coords_sf_prj <- st_read(file.path(data_dir_coastalsheds, "ncaa_coords", "ncaa_coords_wgs84.shp")) %>%
     st_transform(4269) 
 ncaa_siteIDs <- ncaa_coords_sf_prj$SITE_ %>% unique()
-huc12sheds <- st_read("/nfs/khondula-data/coastalsheds/huc12sheds_union.shp")
+huc12sheds <- st_read(file.path(data_dir_coastalsheds, "huc12sheds_union.shp"))
 huc12shed_shpfiles <- fs::dir_ls(file.path(data_dir_coastalsheds, "ncaa_huc12sheds"), glob = "*.shp")
 ```
 
