@@ -37,6 +37,10 @@ huc12sheds <- sf::st_as_sf(data.table::rbindlist(huc12sheds_list))
 # save as one shapefile
 head(huc12sheds)
 huc12sheds %>% st_write(file.path(data_dir_coastalsheds, "huc12sheds_union.shp"))
+# save as google earth file
+huc12sheds %>% mutate(Name = SITE_ID) %>% st_write(file.path(data_dir_coastalsheds, "huc12sheds_union.kml"))
+# save points as google earth file
+ncaa_coords_sf %>% mutate(Name = SITE_ID) %>% st_write(file.path(data_dir_coastalsheds, "ncaa_points.kml"))
 ```
 
 Plot leaflet map for a select site id with watershed
@@ -69,5 +73,54 @@ leaflet() %>%
   addPolygons(data = huc12shed_union, fillOpacity = 0) %>% 
   addMarkers(data = ncaa_pt)
   
+```
+
+Save as images
+```{r}
+library(ggplot2)
+library(rosm)
+library(RStoolbox)
+ncaa_siteID <- ncaa_siteIDs[510] %>% as.character()
+
+# make sure huc12shed_shpfiles, huc12sheds, and ncaa_coords_sf_prj exist in environment
+
+save_watershed_map <- function(ncaa_siteID){
+  
+  huc12shed_shpfile <- grep(pattern = ncaa_siteID, huc12shed_shpfiles, value = TRUE)
+  huc12shed <- st_read(huc12shed_shpfile)
+  huc12shed_union <- filter(huc12sheds, SITE_ID == ncaa_siteID)
+  ncaa_pt <- filter(ncaa_coords_sf_prj, SITE_ == ncaa_siteID)
+
+
+  myextent <- sp::bbox(as(huc12shed, "Spatial"))
+  osm1 <- osm.raster(myextent)
+
+  huc12shed_prj <- st_transform(huc12shed, 3857)
+
+  m1 <- ggRGB(osm1, ggObj = TRUE, r = 1, g = 2, b = 3)
+
+  m2 <- m1 + 
+    geom_sf(data = huc12shed_prj, color = "black", fill = "yellow", alpha = 0.1, lwd = 1.5) +
+    geom_sf(data = st_transform(ncaa_pt, 3857), pch = 21, fill = "red", size = 3) +
+    theme_minimal() +
+    ggtitle(ncaa_siteID) +
+    xlab(element_blank()) + 
+    ylab(element_blank())
+
+  filename <- sprintf("maps/%s.png", ncaa_siteID)
+  png(filename, width = 1000, height = 800)
+    print(m2)
+  dev.off()
+  
+}
+
+
+```
+
+```{r}
+ncaa_siteIDs <- ncaa_siteIDs %>% as.character()
+
+save_watershed_map(ncaa_siteID = ncaa_siteIDs[1])
+purrr::walk(ncaa_siteIDs, ~save_watershed_map(.x)) # This will take a long time. 
 ```
 
