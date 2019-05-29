@@ -20,37 +20,52 @@ library(fs)
 library(dplyr)
 ```
 
-```{r}
-# zipfiles <- sprintf("https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/WBD/HU2/Shape/WBD_%s_HU2_Shape.zip", stringr::str_pad(1:22, width = 2, pad = "0"))
-# destfiles <- sprintf("/nfs/khondula-data/wbd/huc_%s.zip", stringr::str_pad(1:22, width = 2, pad = "0"))
-# purrr::walk2(.x = zipfiles, .y = destfiles, .f = ~download.file(url = .x, destfile = .y))
-# unzipfiles <- sprintf("/nfs/khondula-data/wbd/Shape_%s", stringr::str_pad(1:22, width = 2, pad = "0"))
-# purrr::walk2(.x = destfiles, .y = unzipfiles, .f = ~unzip(.x, exdir = .y))
-```
+# data 
 
-
-```{r}
-# download.file(url = "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/WBD/National/GDB/WBD_National_GDB.zip", destfile = "/nfs/khondula-data/wbd/nationalwbd.zip")
-# unzip( "/nfs/khondula-data/wbd/nationalwbd.zip", exdir = "/nfs/khondula-data/wbd/")
-# huc 2 gdb file downloaded from 
-# https://nrcs.app.box.com/v/gateway/folder/39640323180
-```
+Locations of watershed boundary dataset and data for this project
 
 ```{r}
 data_dir_wbd <- "/nfs/khondula-data/wbd"
 data_dir_coastalsheds <- "/nfs/khondula-data/coastalsheds"
 ```
 
+Download and unzip watershed boundary dataset if not done already
+
 ```{r}
+# zipfiles <- sprintf("https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/WBD/HU2/Shape/WBD_%s_HU2_Shape.zip", stringr::str_pad(1:22, width = 2, pad = "0"))
+# destfiles <- sprintf(file.path(data_dir_wbd, "huc_%s.zip"), stringr::str_pad(1:22, width = 2, pad = "0"))
+# purrr::walk2(.x = zipfiles, .y = destfiles, .f = ~download.file(url = .x, destfile = .y))
+# unzipfiles <- sprintf(file.path(data_dir_wbd, "Shape_%s"), stringr::str_pad(1:22, width = 2, pad = "0"))
+# purrr::walk2(.x = destfiles, .y = unzipfiles, .f = ~unzip(.x, exdir = .y))
+```
+
+HUC 2 geodatabase file downloaded from https://nrcs.app.box.com/v/gateway/folder/39640323180
+
+```{r}
+# download.file(url = "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/WBD/National/GDB/WBD_National_GDB.zip", destfile = file.path(data_dir_wbd, "nationalwbd.zip"))
+# unzip(file.path(data_dir_wbd, "nationalwbd.zip"), exdir = data_dir_wbd)
+```
+
+Read in ncaa points file created with consistent coordinate reference system and project to watershed boundary CRS. Note that SITE_ID column gets converted to SITE_ when writing as Esri shapefile
+
+```{r}
+ncaa_coords_sf <- st_read(file.path(data_dir_coastalsheds, "ncaa_coords", "ncaa_coords_wgs84.shp")) %>%
 ncaa_coords_sf_prj <- st_transform(ncaa_coords_sf, 4269)
-unique(ncaa_coords_sf_prj$SITE_) %>% length()
-# ncaa_siteID <- ncaa_coords_sf_prj$SITE_ID[4]
-ncaa_siteID <- "NCCAGL10-GLBA10-031"
+```
+
+# Workflow step by step 
+
+Select one site ID to test out workflow
+
+```{r}
+ncaa_siteID <- ncaa_coords_sf_prj$SITE_[4]
+# ncaa_siteID <- "NCCAGL10-1026"
+# ncaa_siteID <- "NCCAGL10-NPS09-096" # lake michigan example
 my_ncaa_pt <- filter(ncaa_coords_sf_prj, SITE_ == ncaa_siteID)[1]
 mypt_id <- ncaa_siteID
 ```
 
-find which huc 2 the point is in
+find which huc 2 the point is in, or the nearest HUC 2
 
 ```{r}
 huc2 <- st_read(file.path(data_dir_wbd, "wbdhu2_a_us_september2018.gdb")) %>% st_transform(4269)
@@ -66,7 +81,7 @@ if(length(my_huc2_id)==0){
 my_huc2_id
 ```
 
-then read in HUC 12s
+then read in HUC 12s for that watershed
 
 ```{r}
 huc12_filepath <- file.path(data_dir_wbd, sprintf("Shape_%s/Shape/WBDHU12.shp", my_huc2_id))
@@ -84,9 +99,9 @@ if(length(my_huc12_id)==0){
 }
 ```
 
-function to find all upstream HUC12s
-```{r}
+Convert to an edgelist network to find all upstream HUC12s
 
+```{r}
 huc12_edgelist <- huc12 %>% st_drop_geometry() %>% dplyr::select(HUC12, ToHUC)
 huc12_network <- huc12_edgelist %>% igraph::graph_from_data_frame()
 paths_in <- igraph::all_simple_paths(huc12_network, from = my_huc12_id, mode = "in")
@@ -94,7 +109,7 @@ upstream_huc12s <- sapply(paths_in, names) %>% unlist() %>% unique()
 upstream_huc12s
 ```
 
-Filter those from huc 12 dataset and save with site ID
+Filter those from huc 12 dataset, combine with huc 12 the point is in in case there are no upstream hucs, and union into one polygon
 
 ```{r}
 upstream_huc12s_sf <- dplyr::filter(huc12, HUC12 %in% upstream_huc12s) %>% rbind(my_huc12)
@@ -118,20 +133,26 @@ st_write(upstream_huc12s_sf_union, file.path(data_dir_coastalsheds, "ncaa_huc12s
                                                sprintf("%s_huc12shed_union.shp", mypt_id)))
 ```
 
-Everything above as a function of a point site id (for iteration)
+# Workflow function
+
 ```{r}
 ncaa_siteID <- ncaa_siteIDs_GL[1]
+ncaa_siteID <- "NCCAGL10-GLBA10-150"
 ```
+
+Self-contained function based on a site ID
 
 ```{r}
 save_huc12shed_for_pt <- function(ncaa_siteID){
   # locations for data
   data_dir_wbd <- "/nfs/khondula-data/wbd"
   data_dir_coastalsheds <- "/nfs/khondula-data/coastalsheds"
+  # where to save output shapefiles
   out_path <- file.path(data_dir_coastalsheds, "ncaa_huc12sheds")
   out_path2 <- file.path(data_dir_coastalsheds, "ncaa_huc12sheds_union")
   if(!fs::dir_exists(out_path)){fs::dir_create(out_path)}
   if(!fs::dir_exists(out_path2)){fs::dir_create(out_path2)}
+  
   # read in ncaa coordinates
   ncaa_coords_sf_prj <- st_read(file.path(data_dir_coastalsheds, "ncaa_coords", "ncaa_coords_wgs84.shp")) %>%
     st_transform(4269) # project coords to WBD prj
@@ -169,41 +190,65 @@ save_huc12shed_for_pt <- function(ncaa_siteID){
   
   # FOR GREAT LAKES
   # variable for whether point is in a great lake huc 12
-my_huc12_GL <- my_huc12_id %in% c("041800000300", # Lake superior
+  my_huc12_GL <- my_huc12_id %in% c("041800000300", # Lake superior
+                                  "041800000100", # frontal lake superior
                                   "042400000300", # Lake Huron
+                                  "040700030401", # frontal lake huron
                                   "041900000002", # Lake Michigan
+                                  # "", # frontal lake michigan
                                   "042600000300", # Lake Erie
                                   "041502000200", # Lake Ontario
                                   "041502000100", # Frontal Lake Ontario
                                   "042600000200" # Frontal lake eries
                                   )
-if(my_huc12_id %in% c("042600000300", "042600000200")){
-  # combine lake erie and frontal lake erie
-  my_huc12 <- st_union(filter(huc12, HUC12 == "042600000300"), 
+  if(my_huc12_id %in% c("042600000300", "042600000200")){
+    # combine lake erie and frontal lake erie
+    my_huc12 <- st_union(filter(huc12, HUC12 == "042600000300"), 
                        filter(huc12, HUC12 == "042600000200"))
-}
-if(my_huc12_id %in% c("041502000200", "041502000100")){
-  # combine lake ontario and frontal lake ontario
-  my_huc12 <- st_union(filter(huc12, HUC12 == "041502000200"), 
+  }
+  if(my_huc12_id %in% c("041502000200", "041502000100")){
+    # combine lake ontario and frontal lake ontario
+     my_huc12 <- st_union(filter(huc12, HUC12 == "041502000200"), 
                        filter(huc12, HUC12 == "041502000100"))
-}
-# my_huc12_GL
+  }
+  if(my_huc12_id %in% c("041800000300", "041800000100")){
+    # combine lake superior and frontal lake superior
+    my_huc12 <- st_union(filter(huc12, HUC12 == "041800000300"), 
+                       filter(huc12, HUC12 == "041800000100"))
+  }
 
-if(my_huc12_GL){
-  # find the point on the outside of the 10m buffered lake polygon that is closest to the point
-  my_huc12_ls <- my_huc12 %>% 
-    st_transform(5070) %>% 
-    st_buffer(500) %>% # try to get beyond the frontal watershed
-    st_transform(4269) %>%
-    st_cast("POLYGON") %>% st_cast("MULTILINESTRING") # convert to line
-  shoreline_pt <- st_nearest_points(my_huc12_ls, my_ncaa_pt) %>% st_cast("POINT")
-  shoreline_pt_sf <- st_sf(id = 1:2, shoreline_pt)[1,]
+# if(my_huc12_id %in% c("041900000002", "")){
+#   # combine lake michigan and frontal lake michigan
+#   my_huc12 <- st_union(filter(huc12, HUC12 == "041900000002"), 
+#                        filter(huc12, HUC12 == ""))
+# }
+
+  if(my_huc12_id %in% c("042400000300", "040700030401")){
+    # combine lake huron and frontal lake huron
+    my_huc12 <- st_union(filter(huc12, HUC12 == "042400000300"), 
+                       filter(huc12, HUC12 == "040700030401"))
+  }
+
+  if(my_huc12_GL){
+    # find the point on the outside of the 10m buffered lake polygon that is closest to the point
+    my_huc12_ls <- my_huc12 %>% 
+      st_transform(5070) %>% 
+      st_buffer(500) %>% # try to get beyond the frontal watershed
+      st_transform(4269) %>%
+      st_cast("POLYGON") %>% st_cast("MULTILINESTRING") # convert to line
+    shoreline_pt <- st_nearest_points(my_huc12_ls, my_ncaa_pt) %>% st_cast("POINT")
+    shoreline_pt_sf <- st_sf(id = 1:2, shoreline_pt)[1,]
   
-  my_huc12_mat <- st_contains(huc12, shoreline_pt_sf, sparse = FALSE)
-  my_huc12_id <- which(apply(my_huc12_mat, 1, any))
-  my_huc12 <- huc12[my_huc12_id,]
-  my_huc12_id <- my_huc12$HUC12 %>% as.character()
-}
+    my_huc12_mat <- st_contains(huc12, shoreline_pt_sf, sparse = FALSE)
+    my_huc12_id <- which(apply(my_huc12_mat, 1, any))
+    my_huc12 <- huc12[my_huc12_id,]
+    my_huc12_id <- my_huc12$HUC12 %>% as.character()
+      # if shoreline point is not in a huc 12, find closest one
+    if(length(my_huc12_id)==0){
+      my_huc12 <- huc12[which.min(st_distance(shoreline_pt_sf, huc12)),]
+      my_huc12_id <- my_huc12$HUC12 %>% as.character()
+    }
+  }
 
   # convert to graph to find all upstream huc 12s
   huc12_edgelist <- huc12 %>% st_drop_geometry() %>% dplyr::select(HUC12, ToHUC)
@@ -215,14 +260,13 @@ if(my_huc12_GL){
   upstream_huc12s_sf <- dplyr::filter(huc12, HUC12 %in% upstream_huc12s) %>% 
     rbind(my_huc12) # combine with original huc12 in case no upstream ones found
   upstream_huc12s_sf_union <- upstream_huc12s_sf %>% st_union()
+  
   st_write(upstream_huc12s_sf,
-           file.path(data_dir_coastalsheds, "ncaa_huc12sheds", 
-                                         sprintf("%s_huc12shed.shp", mypt_id)),
-            delete_dsn = TRUE)
+           file.path(data_dir_coastalsheds, "ncaa_huc12sheds", sprintf("%s_huc12shed.shp", mypt_id)),
+            delete_dsn = TRUE) # overwrite if needed
   st_write(upstream_huc12s_sf_union, 
-           file.path(data_dir_coastalsheds, "ncaa_huc12sheds_union",
-                                               sprintf("%s_huc12shed_union.shp", mypt_id)),
-           delete_dsn = TRUE)
+           file.path(data_dir_coastalsheds, "ncaa_huc12sheds_union", sprintf("%s_huc12shed_union.shp", mypt_id)),
+           delete_dsn = TRUE) # overwrite if needed
 
 }
 ```
@@ -245,8 +289,10 @@ huc12shed_ids <- basename(huc12shed_shpfiles) %>% stringr::str_replace("_huc12sh
 huc12shed_ids %>% length()
 ncaa_siteIDs_toget <- ncaa_siteIDs[!ncaa_siteIDs %in% huc12shed_ids]
 ncaa_siteIDs_GL <- grep("GL", ncaa_siteIDs, value = TRUE)
+ncaa_siteIDs_toget %>% as.character()
 ```
 
+Run on cluster
 ```{r}
 library(rslurm)
 pars <- data.frame(ncaa_siteID = ncaa_siteIDs_GL, stringsAsFactors = FALSE)

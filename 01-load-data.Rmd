@@ -17,22 +17,18 @@ library(readr)
 library(tidyr)
 ```
 
-
 ```{r}
-# download.file("https://water.usgs.gov/GIS/dsdl/huc250k_shp.zip", destfile = "data/wbd.zip")
-# unzip("data/wbd.zip", exdir = "/nfs/khondula-data/wbd/")
-huc250k <- sf::read_sf("/nfs/khondula-data/wbd/huc250k_shp/huc250k.shp") %>% st_transform(4326)
-head(huc250k)
+data_dir_coastalsheds <- "/nfs/khondula-data/coastalsheds"
 ```
 
 # coastal sampling point coordinates
 
 ```{r}
-# download.file("https://raw.githubusercontent.com/ecodasXIII/StoichPatterns/master/data/assessed_ncca2010_siteinfo.revised.06212016.csv", destfile = "data/ncaa_coords.csv")
+download.file("https://raw.githubusercontent.com/ecodasXIII/StoichPatterns/master/data/assessed_ncca2010_siteinfo.revised.06212016.csv", destfile = file.path(data_dir_coastalsheds, "ncaa_coords.csv"))
 ```
 
 ```{r}
-ncaa_coords <- readr::read_csv("data/ncaa_coords.csv")
+ncaa_coords <- readr::read_csv(file.path(data_dir_coastalsheds, "ncaa_coords.csv"))
 table(ncaa_coords$MAP_DATUM)
 ```
 
@@ -52,41 +48,28 @@ ncaa_coords_sf <- ncaa_coords_nad83 %>%
   st_transform(crs = 4326) %>%
   rbind(ncaa_coords_wgs84)
 rm(ncaa_coords, ncaa_coords_nad83, ncaa_coords_wgs84)
-ncaa_coords_sf %>% st_write("/nfs/khondula-data/coastalsheds/ncaa_coords_wgs84.shp")
+ncaa_coords_sf %>% st_write(file.path(data_dir_coastalsheds, "ncaa_coords_wgs84.shp"))
 ```
 
-
-Plot first one 
-
-```{r}
-ncaa_coords_sf[1,] %>%
-  leaflet() %>%
-  addTiles() %>%
-  addMarkers()
-```
 
 ```{r}
 wbd <- "https://hydro.nationalmap.gov/arcgis/services/wbd/MapServer/WMSServer"
 nlcd <- "https://smallscale.nationalmap.gov/arcgis/services/LandCover/MapServer/WMSServer"
 
 ncaa_coords_sf %>%
-  st_transform(5070) %>%
-  st_buffer(5000) %>%
   st_transform(4326) %>%
-  # slice(2) %>%
   leaflet() %>% 
   addTiles() %>%
   # addProviderTiles(providers$Esri.WorldImagery) %>%
-  addPolygons(group = "5km buffer") %>%
-  addMarkers(data = ncaa_coords_sf, group = "points",
+  addMarkers(group = "points",
              clusterOptions = markerClusterOptions()) %>%
   addWMSTiles(nlcd, layers = "1",
               options = WMSTileOptions(format = "image/png", transparent = TRUE),
               group = "NLCD") %>%
-    addWMSTiles(wbd, layers = "7",
+  addWMSTiles(wbd, layers = "7",
               options = WMSTileOptions(format = "image/png", transparent = TRUE),
               group = "WBD transparent") %>%
-  addLayersControl(overlayGroups = c("NLCD", "WBD transparent", "points", "5km buffer"))
+  addLayersControl(overlayGroups = c("NLCD", "WBD transparent", "points"))
   
 ```
 
@@ -95,14 +78,10 @@ nhdp <- "https://basemap.nationalmap.gov/arcgis/services/USGSHydroCached/MapServ
 wbd <- "https://hydro.nationalmap.gov/arcgis/services/wbd/MapServer/WMSServer"
 
 ncaa_coords_sf %>%
-  st_transform(5070) %>%
-  st_buffer(5000) %>%
   st_transform(4326) %>%
-  # slice(2) %>%
   leaflet() %>% 
   addTiles(group = "OSM") %>%
   addProviderTiles(providers$Esri.WorldImagery, group = "Esri imagery") %>%
-  addPolygons(group = "5km buffer") %>%
   addMarkers(data = ncaa_coords_sf, group = "points", label = ~SITE_ID,
              clusterOptions = markerClusterOptions()) %>%
   addWMSTiles(nhdp, layers = "0",
@@ -111,7 +90,7 @@ ncaa_coords_sf %>%
       addWMSTiles(wbd, layers = "7",
               options = WMSTileOptions(format = "image/png", transparent = TRUE),
               group = "WBD transparent") %>%
-    addLayersControl(baseGroups = c("OSM", "Esri imagery"), overlayGroups = c("NLCD","NHD", "WBD transparent", "points", "5km buffer"))
+    addLayersControl(baseGroups = c("OSM", "Esri imagery"), overlayGroups = c("NLCD","NHD", "WBD transparent", "points"))
 
   
 ```
